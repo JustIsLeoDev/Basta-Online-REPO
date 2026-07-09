@@ -34,13 +34,30 @@ wss.on('connection', (ws) => {
                     }
                     break;
 
-                case 'submit_round':
-                    // REPASTE: El cliente manda sus respuestas validadas y se las arrojamos a Godot
-                    console.log(`Respuestas recibidas de ${data.player}. Repasteando a Godot...`);
+                case 'start_game':
+                    // --- NUEVO CASO CORREGIDO ---
+                    // El host da inicio. Recorremos el Map de clientes y les enviamos la configuración de la ronda
+                    console.log(`¡El Host inició la partida! Reenviando letra [${data.letra}] y temas a los jugadores...`);
+                    
+                    clientes.forEach((clientSocket, username) => {
+                        if (clientSocket.readyState === WebSocket.OPEN) {
+                            clientSocket.send(JSON.stringify({
+                                type: 'start_game',
+                                letra: data.letra,
+                                temas: data.temas
+                            }));
+                        }
+                    });
+                    break;
+
+                case 'player_answer':
+                    // --- CORREGIDO PARA EL NUEVO CLIENTE ---
+                    // El cliente manda sus respuestas y se las arrojamos a Godot Host
+                    console.log(`Respuestas recibidas de ${data.username}. Repasteando a Godot Host...`);
                     if (godotHost && godotHost.readyState === WebSocket.OPEN) {
                         godotHost.send(JSON.stringify({
                             type: 'player_answer',
-                            username: data.player,
+                            username: data.username,
                             answers: data.answers
                         }));
                     }
