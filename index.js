@@ -9,8 +9,27 @@ let clientes = new Map(); // Guardará a los jugadores conectados
 
 console.log(`Servidor orquestador corriendo en el puerto ${PORT}`);
 
+// --- SISTEMA ANTIDESCONEXIÓN (PING-PONG) ---
+// Revisa cada 30 segundos si las conexiones siguen vivas para ganarle al timeout de Render
+const interval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) {
+            console.log('Conexión inactiva detectada. Terminando socket...');
+            return ws.terminate();
+        }
+        ws.isAlive = false;
+        ws.ping(); // Envía un ping de control (baja capa de red)
+    });
+}, 30000);
+
 wss.on('connection', (ws) => {
+    ws.isAlive = true;
     console.log('Nueva conexión de red establecida.');
+
+    // Al recibir respuesta del ping, marcamos como vivo
+    ws.on('pong', () => {
+        ws.isAlive = true;
+    });
 
     ws.on('message', (message) => {
         try {
@@ -18,7 +37,6 @@ wss.on('connection', (ws) => {
             
             switch (data.type) {
                 case 'register_host':
-                    // El Godot principal se identifica como el HOST
                     godotHost = ws;
                     console.log('¡Servidor Principal de Godot (Host) registrado!');
                     break;
@@ -35,9 +53,7 @@ wss.on('connection', (ws) => {
                     break;
 
                 case 'start_game':
-                    // --- NUEVO CASO CORREGIDO ---
-                    // El host da inicio. Recorremos el Map de clientes y les enviamos la configuración de la ronda
-                    console.log(`¡El Host inició la partida! Reenviando letra [${data.letra}] y temas a los jugadores...`);
+                    console.log(`¡El Host inició la partida! Reenviando letra [${data.letra}] y temas...`);
                     
                     clientes.forEach((clientSocket, username) => {
                         if (clientSocket.readyState === WebSocket.OPEN) {
@@ -51,8 +67,6 @@ wss.on('connection', (ws) => {
                     break;
 
                 case 'player_answer':
-                    // --- CORREGIDO PARA EL NUEVO CLIENTE ---
-                    // El cliente manda sus respuestas y se las arrojamos a Godot Host
                     console.log(`Respuestas recibidas de ${data.username}. Repasteando a Godot Host...`);
                     if (godotHost && godotHost.readyState === WebSocket.OPEN) {
                         godotHost.send(JSON.stringify({
@@ -73,14 +87,26 @@ wss.on('connection', (ws) => {
             console.log('El servidor central de Godot se ha desconectado.');
             godotHost = null;
         } else {
-            // Buscar y limpiar el cliente desconectado
+            // Buscar, limpiar y avisar a Godot de la baja del jugador
             for (let [user, socket] of clientes.entries()) {
                 if (socket === ws) {
                     clientes.delete(user);
-                    console.log(`Jugador desconectado: ${user}`);
+                    console.log(`Jugador desconectado de Node.js: ${user}`);
+                    
+                    // 🔥 CRÍTICO: Avisarle al Host de Godot para que lo borre de su lista_jugadores
+                    if (godotHost && godotHost.readyState === WebSocket.OPEN) {
+                        godotHost.send(JSON.stringify({ 
+                            type: 'player_left', 
+                            username: user 
+                        }));
+                    }
                     break;
                 }
             }
         }
     });
+});
+
+wss.on('close', () => {
+    clearInterval(interval);
 });
